@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"clipping_ia_hook/internal/ui"
 )
@@ -146,12 +147,23 @@ func doPrompt(outDir string) bool {
 		ui.ErrLn(err.Error())
 		return false
 	}
+
 	ui.OKLn(fmt.Sprintf("Prompt → %s (%d chars)", promptPath, len(prompt)))
+
+	// NUEVO: versión colapsada a una línea (para DeepSeek sin problemas de textarea)
+	onelinePath := filepath.Join(outDir, "prompt_deepseek_oneline.txt")
+	oneline := ColapsarAUnaLinea(prompt)
+	if err := os.WriteFile(onelinePath, []byte(oneline), 0644); err != nil {
+		ui.WarnLn("guardando one-line: " + err.Error())
+	} else {
+		ui.OKLn(fmt.Sprintf("One-line → %s (%d chars)", onelinePath, len(oneline)))
+	}
 	return true
 }
 
 func doDeepSeek(outDir string) bool {
 	promptPath := filepath.Join(outDir, "prompt_deepseek.txt")
+	onelinePath := filepath.Join(outDir, "prompt_deepseek_oneline.txt")
 	respPath := filepath.Join(outDir, "respuesta_deepseek.txt")
 
 	if !ui.Exists(promptPath) {
@@ -166,9 +178,25 @@ func doDeepSeek(outDir string) bool {
 			return true
 		}
 	}
-	prompt, _ := os.ReadFile(promptPath)
+
+	// Preferir la versión de UNA LÍNEA (mucho más robusta al inyectar)
+	var prompt string
+	if ui.Exists(onelinePath) {
+		data, _ := os.ReadFile(onelinePath)
+		prompt = strings.TrimSpace(string(data))
+		fmt.Println(ui.Col(ui.Gray,
+			fmt.Sprintf("  ↪ Usando one-line (%d chars)", len(prompt))))
+	} else {
+		data, _ := os.ReadFile(promptPath)
+		prompt = ColapsarAUnaLinea(string(data))
+		// Persistir para la próxima vez
+		_ = os.WriteFile(onelinePath, []byte(prompt), 0644)
+		fmt.Println(ui.Col(ui.Gray,
+			fmt.Sprintf("  ↪ Colapsado a one-line (%d chars)", len(prompt))))
+	}
+
 	fmt.Println(ui.Col(ui.Cyan, "🤖 Consultando DeepSeek (abre Brave)..."))
-	resp, err := ObtenerRespuestaDeepSeek(string(prompt))
+	resp, err := ObtenerRespuestaDeepSeek(prompt)
 	if err != nil {
 		ui.ErrLn(err.Error())
 		return false

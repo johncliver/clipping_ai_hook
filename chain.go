@@ -2,9 +2,8 @@ package main
 
 import (
 	"fmt"
-	"os"
-	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"clipping_ia_hook/internal/ui"
 )
@@ -66,25 +65,23 @@ func ensureTranscripcion(source, outDir string) bool {
 	return doTranscribe(source, outDir)
 }
 
+// chain.go
 func ensureVideo(source, outDir string) (string, error) {
 	if esArchivoLocal(source) {
 		return source, nil
 	}
-	vp := filepath.Join(outDir, "video.mp4")
-	if ui.Exists(vp) {
-		fmt.Println(ui.Col(ui.Gray, "  ↪ Reusando "+vp))
-		return vp, nil
+
+	// Reusar si ya existe (mp4 preferido; si hay mkv/webm también vale)
+	if m, _ := filepath.Glob(filepath.Join(outDir, "video.*")); len(m) > 0 {
+		for _, f := range m {
+			switch strings.ToLower(filepath.Ext(f)) {
+			case ".mp4", ".mkv", ".webm", ".mov":
+				fmt.Println(ui.Col(ui.Gray, "  ↪ Reusando "+f))
+				return f, nil
+			}
+		}
 	}
-	fmt.Println(ui.Col(ui.Cyan, "📥 Descargando video de YouTube → "+vp))
-	cmd := exec.Command("yt-dlp",
-		"-f", "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best",
-		"--merge-output-format", "mp4",
-		"-o", vp, source,
-	)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("yt-dlp video: %w", err)
-	}
-	return vp, nil
+
+	fmt.Println(ui.Col(ui.Cyan, "📥 Descargando video de YouTube (H.264+AAC)…"))
+	return descargarVideoEn(source, outDir)
 }

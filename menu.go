@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"path/filepath"
 
 	"clipping_ia_hook/internal/ui"
 )
@@ -14,7 +15,31 @@ func imprimirCabecera(source, outDir string) {
 	fmt.Println("  " + ui.D("📂 Origen:  ") + ui.Col(ui.White, source))
 	fmt.Println("  " + ui.D("📁 Salida:  ") + ui.Col(ui.White, outDir+"/"))
 	fmt.Println("  " + ui.D("🔧 Texto:   ") + ui.Estado(SeguirTexto))
+	fmt.Println("  " + ui.D("🔧 Texto:   ") + ui.Estado(SeguirTexto))
+	fmt.Println("  " + ui.D("🖼️  End card:") + " " + estadoEndCard())
+	fmt.Println("  " + ui.D("🖼️  End card:") + " " + estadoEndCard())
+	fmt.Println("  " + ui.D("📝 Subtítulos:") + " " + estadoSubtitulos())
 	fmt.Println(ui.Col(ui.Cyan, "════════════════════════════════════════════════════════"))
+}
+
+func estadoEndCard() string {
+	if EndCardImagen == "" {
+		return ui.Col(ui.Gray, "OFF")
+	}
+	return ui.Col(ui.Green+ui.Bold, fmt.Sprintf("ON · %.1fs · %s",
+		EndCardDuracion, filepath.Base(EndCardImagen)))
+}
+
+func estadoSubtitulos() string {
+	icono := "⬇️"
+	switch SubsPosicion {
+	case "top":
+		icono = "⬆️"
+	case "center":
+		icono = "⏺️"
+	}
+	return fmt.Sprintf("%s %s · %dpx · %dpt",
+		icono, SubsPosicion, SubsMargenV, SubsTamaño)
 }
 
 func imprimirMenu() {
@@ -52,8 +77,29 @@ func imprimirMenu() {
 		ui.Col(ui.Green, "Horizontal → Vertical (1080x1920)"))
 	fmt.Printf("  %s)  %s\n",
 		ui.Col(ui.Yellow+ui.Bold, "13"),
+		ui.Col(ui.Green, "Marca de agua a clips/videos"))
+	fmt.Printf("  %s)  %s  %s\n",
+		ui.Col(ui.Yellow+ui.Bold, "14"),
+		ui.Col(ui.White, "End card en clips"),
+		ui.Estado(EndCardImagen != ""))
+	fmt.Printf("  %s)  %s\n",
+		ui.Col(ui.Yellow+ui.Bold, "15"),
+		ui.Col(ui.Green, "Añadir end card a clips existentes (post-proceso)"))
+	fmt.Printf("  %s)  %s  %s\n",
+		ui.Col(ui.Yellow+ui.Bold, "16"),
+		ui.Col(ui.White, "Crop híbrido (cara/blur)"),
+		ui.Estado(CropHibrido))
+	fmt.Printf("  %s)  %s  %s\n",
+		ui.Col(ui.Yellow+ui.Bold, "17"),
+		ui.Col(ui.White, "Posición de subtítulos"),
+		ui.Estado(SubsPosicion != "bottom"))
+	fmt.Printf("  %s)  %s  %s\n",
+		ui.Col(ui.Yellow+ui.Bold, "18"),
+		ui.Col(ui.White, "Tamaño crop horizontal (blur)"),
+		ui.Col(ui.Gray, CropHorizontalPreset))
+	fmt.Printf("  %s)  %s\n",
+		ui.Col(ui.Yellow+ui.Bold, "19"),
 		ui.Col(ui.Red, "Salir"))
-
 	fmt.Println(ui.Col(ui.Cyan, ui.Rule))
 }
 

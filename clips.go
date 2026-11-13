@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -307,6 +308,113 @@ func facePosicionEn(fd *FaceData, tAbs float64, cropW, srcW int) float64 {
 	return x
 }
 
+// ---- Habla + anticipación (look-ahead) ----
+
+// hayHablaEnVentana devuelve true si hay algún segmento activo en [t0, t1].
+// Se usa para anticipar el foco al hablante antes de que hable.
+func hayHablaEnVentana(t *Transcripcion, t0, t1 float64) bool {
+	if t == nil {
+		return false
+	}
+	for _, seg := range t.Segmentos {
+		if seg.Fin <= t0 {
+			continue
+		}
+		if seg.Inicio >= t1 {
+			return false
+		}
+		return true
+	}
+	return false
+}
+
+// buscarCaraHablante busca en las muestras de caras dentro de [t0, t1]
+// la cara con más mouth_motion (o speaking_id) y devuelve su detección.
+// Fallback: la cara más grande de la ventana.
+func buscarCaraHablante(fd *FaceData, t0, t1 float64) *FaceDetect {
+	if fd == nil {
+		return nil
+	}
+	var best *FaceDetect
+	bestMotion := -1.0
+	for i := range fd.Samples {
+		s := &fd.Samples[i]
+		if s.T < t0 || s.T > t1 {
+			continue
+		}
+		if s.SpeakingID != nil {
+			for j := range s.Faces {
+				if s.Faces[j].ID == *s.SpeakingID {
+					if s.Faces[j].MouthMotion > bestMotion {
+						bestMotion = s.Faces[j].MouthMotion
+						best = &s.Faces[j]
+					}
+				}
+			}
+		}
+	}
+	if best != nil {
+		return best
+	}
+	// Fallback: la cara más grande de la ventana
+	for i := range fd.Samples {
+		s := &fd.Samples[i]
+		if s.T < t0 || s.T > t1 {
+			continue
+		}
+		for j := range s.Faces {
+			if best == nil || s.Faces[j].W > best.W {
+				best = &s.Faces[j]
+			}
+		}
+	}
+	return best
+}
+
+// facePosicionConHabla: como facePosicionEn pero usa la transcripción para
+// ANTICIPAR el foco hacia el hablante antes de que empiece a hablar.
+//
+// Orden de prioridad:
+//  1. Si en [t, t+1.2] habrá habla → mover al hablante futuro (look-ahead)
+//  2. Si en [t-0.7, t+0.7] hay habla activa → priorizar al hablante actual
+//  3. Fallback → cara más grande (comportamiento anterior)
+func facePosicionConHabla(fd *FaceData, t *Transcripcion, tAbs float64,
+	cropW, srcW int) float64 {
+	if fd == nil {
+		return -1
+	}
+	maxX := float64(srcW - cropW)
+	if maxX < 0 {
+		maxX = 0
+	}
+	clampX := func(x float64) float64 {
+		if x < 0 {
+			return 0
+		}
+		if x > maxX {
+			return maxX
+		}
+		return x
+	}
+
+	// 1) Anticipación: si habrá habla, ir al hablante futuro
+	if hayHablaEnVentana(t, tAbs, tAbs+1.2) {
+		if face := buscarCaraHablante(fd, tAbs, tAbs+1.2); face != nil {
+			return clampX(face.CX*float64(srcW) - float64(cropW)/2)
+		}
+	}
+
+	// 2) Habla actual: si está hablando ahora, priorizar al hablante actual
+	if hayHablaEnVentana(t, tAbs-0.7, tAbs+0.7) {
+		if face := buscarCaraHablante(fd, tAbs-0.7, tAbs+0.7); face != nil {
+			return clampX(face.CX*float64(srcW) - float64(cropW)/2)
+		}
+	}
+
+	// 3) Fallback: cara más grande
+	return facePosicionEn(fd, tAbs, cropW, srcW)
+}
+
 // construirCropTrackUnificado mezcla caras y (opcionalmente) texto en una serie
 // temporal y devuelve keyframes comprimidos para FFmpeg.
 //
@@ -316,7 +424,9 @@ func facePosicionEn(fd *FaceData, tAbs float64, cropW, srcW int) float64 {
 //     gana el texto. Si el bloque es más ancho que el crop, se panea a
 //     velocidad de lectura.
 //   - Si no hay ninguno, mantiene la última posición.
-func construirCropTrackUnificado(fd *FaceData, td *TextData,
+//   - Si hay habla en la transcripción, se anticipa el foco al hablante
+//     (look-ahead) antes de que empiece a hablar.
+func construirCropTrackUnificado(fd *FaceData, td *TextData, t *Transcripcion,
 	inicio, fin float64, cropW, srcW int) []CropKey {
 
 	maxX := float64(srcW - cropW)
@@ -333,7 +443,7 @@ func construirCropTrackUnificado(fd *FaceData, td *TextData,
 	// Posición inicial
 	x := maxX / 2.0
 	if fd != nil {
-		if fx := facePosicionEn(fd, inicio, cropW, srcW); fx >= 0 {
+		if fx := facePosicionConHabla(fd, t, inicio, cropW, srcW); fx >= 0 {
 			x = fx
 		}
 	}
@@ -342,7 +452,7 @@ func construirCropTrackUnificado(fd *FaceData, td *TextData,
 	var series []sample
 
 	// Para paneo de lectura dentro de un bloque:
-	var lectT0 float64 = -1 // inicio del bloque actual de texto dominante
+	lectT0 := -1.0 // inicio del bloque actual de texto dominante
 	var lectX0, lectX1 float64
 	var lectDur float64
 
@@ -391,8 +501,8 @@ func construirCropTrackUnificado(fd *FaceData, td *TextData,
 		}
 
 		if target < 0 {
-			// Sin texto dominante (o SeguirTexto=false): cara
-			if fx := facePosicionEn(fd, tAbs, cropW, srcW); fx >= 0 {
+			// Sin texto dominante (o SeguirTexto=false): cara con anticipación
+			if fx := facePosicionConHabla(fd, t, tAbs, cropW, srcW); fx >= 0 {
 				target = fx
 			} else {
 				target = x
@@ -494,11 +604,31 @@ func GenerarClip(videoPath string, t *Transcripcion,
 	}
 
 	args := ConstruirComandoClip(videoPath, output, assPath,
-		clip.InicioSeg, clip.FinSeg, cropX, faceData, textData, srcW, srcH)
+		clip.InicioSeg, clip.FinSeg, cropX, faceData, textData, t, srcW, srcH)
+
 	if err := EjecutarFFmpeg(args); err != nil {
 		return fmt.Errorf("ffmpeg clip %d: %w", idx, err)
 	}
 	fmt.Printf("   ✅ clip %d: %s\n", idx+1, output)
+
+	// ── End card automático (si está configurado) ──
+	if EndCardImagen != "" {
+		tmpOut := strings.TrimSuffix(output, ".mp4") + "_endtmp.mp4"
+		if err := AplicarEndCardEnClip(output, tmpOut); err != nil {
+			fmt.Printf("   ⚠️  end card falló para clip %d: %v\n", idx+1, err)
+			_ = os.Remove(tmpOut)
+		} else {
+			_ = os.Remove(output)
+			if err := os.Rename(tmpOut, output); err != nil {
+				// Fallback: dejar el archivo con sufijo _end
+				finalName := strings.TrimSuffix(output, ".mp4") + "_end.mp4"
+				_ = os.Rename(tmpOut, finalName)
+				fmt.Printf("   🖼️  clip %d con end card → %s\n", idx+1, filepath.Base(finalName))
+			} else {
+				fmt.Printf("   🖼️  end card aplicado a clip %d\n", idx+1)
+			}
+		}
+	}
 	return nil
 }
 

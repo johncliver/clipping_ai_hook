@@ -5,15 +5,19 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
-// descargarVideoEn baja a outDir/video.mp4 (persistente).
+// descargarVideoEn baja a outDir/video.mp4 con H.264 + AAC (compatibles con
+// todas las plataformas al subir). yt-dlp invoca ffmpeg para el merge.
 func descargarVideoEn(url, outDir string) (string, error) {
-	outPath := filepath.Join(outDir, "video.mp4")
+	outTpl := filepath.Join(outDir, "video.%(ext)s")
+
 	cmd := exec.Command("yt-dlp",
-		"-f", "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best",
+		"-f", "bv*[vcodec^=avc1][ext=mp4]+ba[acodec^=mp4a]/bv*[ext=mp4]",
 		"--merge-output-format", "mp4",
-		"-o", outPath,
+		"--no-playlist",
+		"-o", outTpl,
 		url,
 	)
 	cmd.Stdout = os.Stdout
@@ -21,5 +25,22 @@ func descargarVideoEn(url, outDir string) (string, error) {
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("yt-dlp video: %w", err)
 	}
-	return outPath, nil
+
+	// yt-dlp decidió la extensión final (normalmente .mp4)
+	matches, _ := filepath.Glob(filepath.Join(outDir, "video.*"))
+	for _, m := range matches {
+		switch strings.ToLower(filepath.Ext(m)) {
+		case ".mp4", ".mkv", ".webm", ".mov":
+			// Renombra a video.mp4 si quedó distinto (fallback imprevisto)
+			if !strings.HasSuffix(strings.ToLower(m), ".mp4") {
+				final := filepath.Join(outDir, "video.mp4")
+				_ = os.Remove(final)
+				if err := os.Rename(m, final); err == nil {
+					return final, nil
+				}
+			}
+			return m, nil
+		}
+	}
+	return "", fmt.Errorf("yt-dlp terminó pero no encontré video.* en %s", outDir)
 }

@@ -59,3 +59,19 @@ func filtrarTexto(td *TextData, inicio, fin float64) *TextData {
 	}
 	return out
 }
+
+// ColapsarAUnaLinea convierte saltos de línea, tabs y espacios múltiples
+// en un solo espacio. Resultado: el prompt es un único string sin \n.
+// Útil para inyectarlo en el textarea de DeepSeek sin que React/Enter
+// parta el texto o pierda caracteres al pegar.
+func ColapsarAUnaLinea(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\t", " ")
+	// Colapsar espacios múltiples
+	for strings.Contains(s, "  ") {
+		s = strings.ReplaceAll(s, "  ", " ")
+	}
+	return strings.TrimSpace(s)
+}

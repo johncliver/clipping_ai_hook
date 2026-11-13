@@ -6,9 +6,48 @@ import (
 	"os/exec"
 )
 
+// ConstruirComandoClip es el DISPATCHER: elige entre el modo híbrido
+// (cara→9:16 / sin cara→4:5+blur) y el crop 9:16 puro clásico.
 func ConstruirComandoClip(input, output, assPath string,
 	inicio, fin, cropX float64,
-	faceData *FaceData, textData *TextData,
+	faceData *FaceData, textData *TextData, t *Transcripcion,
+	srcW, srcH int) []string {
+
+	targetW, targetH := 1080, 1920
+	if srcW <= 0 || srcH <= 0 {
+		srcW, srcH = 1920, 1080
+	}
+
+	// Modo híbrido (si activado). construirFiltergraphHibrido SIEMPRE devuelve
+	// un filtergraph válido: blur puro si no hay caras, híbrido si las hay.
+	if CropHibrido {
+		if fc := construirFiltergraphHibrido(inicio, fin, cropX,
+			faceData, textData, t, srcW, srcH, targetW, targetH, assPath); fc != "" {
+			return []string{
+				"-y",
+				"-ss", fmt.Sprintf("%.3f", inicio),
+				"-to", fmt.Sprintf("%.3f", fin),
+				"-i", input,
+				"-filter_complex", fc,
+				"-map", "[vout]",
+				"-map", "0:a?",
+				"-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+				"-c:a", "aac", "-b:a", "192k",
+				"-movflags", "+faststart",
+				output,
+			}
+		}
+	}
+
+	return construirClipCropPuro(input, output, assPath, inicio, fin,
+		cropX, faceData, textData, t, srcW, srcH)
+}
+
+// construirClipCropPuro es la función ORIGINAL (solo le cambiamos el nombre).
+// Modo clásico: crop 9:16 siguiendo caras + subtítulos vía -vf.
+func construirClipCropPuro(input, output, assPath string,
+	inicio, fin, cropX float64,
+	faceData *FaceData, textData *TextData, t *Transcripcion,
 	srcW, srcH int) []string {
 
 	targetW, targetH := 1080, 1920
@@ -29,8 +68,7 @@ func ConstruirComandoClip(input, output, assPath string,
 		cropH--
 	}
 
-	// Track unificado: caras + texto (paneo de lectura)
-	keys := construirCropTrackUnificado(faceData, textData, inicio, fin, cropW, srcW)
+	keys := construirCropTrackUnificado(faceData, textData, t, inicio, fin, cropW, srcW)
 
 	cropDefault := int(cropX*float64(srcW)) - cropW/2
 	if cropDefault < 0 {

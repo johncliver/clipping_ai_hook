@@ -119,7 +119,7 @@ DURACIÓN Y CORTES (MUY IMPORTANTE — el usuario quiere clips MÁS LARGOS)
   timestamps válidos del video (principio, medio, final). No tienen que ser
   consecutivos ni alineados a segmentos. El único requisito es respetar la
   regla del hook.
-
+%s
 ════════════════════════════════════════════════════════════════════
 MÚSICA DE FONDO (sugerida según contexto)
 ════════════════════════════════════════════════════════════════════
@@ -223,7 +223,7 @@ NOTAS FINALES:
 		reglasCampana, transcripcion, faceInfo, textInfo,
 		fin-inicio, inicio, fin,
 		maxClipSegundos,
-		bonusTexto,
+		bonusTexto, // ← ahora sí lo consume el 5º %s (justo antes de MÚSICA)
 		maxClipSegundos,
 		maxClipSegundos)
 }

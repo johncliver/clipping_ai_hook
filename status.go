@@ -38,4 +38,14 @@ func showStatus(outDir string) {
 		ui.Col(ui.Cyan, "🔧"),
 		ui.Col(ui.White, "Seguir texto en crop: ")+ui.Estado(SeguirTexto))
 	fmt.Println(ui.Col(ui.Cyan, ui.Rule))
+	fmt.Printf("  %s %s %s\n",
+		ui.Col(ui.Cyan, "🖼️ "),
+		ui.Col(ui.White, "End card en clips: "),
+		ui.Estado(EndCardImagen != ""))
+	if EndCardImagen != "" {
+		fmt.Printf("       %s %s (%.1fs)\n",
+			ui.Col(ui.Gray, "→"),
+			ui.Col(ui.White, EndCardImagen),
+			EndCardDuracion)
+	}
 }

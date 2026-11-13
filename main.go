@@ -88,10 +88,28 @@ func main() {
 		case "12":
 			doVertical(outDir)
 		case "13":
+			doWatermark(outDir)
+		case "14":
+			configurarEndCard()
+		case "15":
+			doEndCard(outDir) // ← utilidad suelta para clips ya existentes
+		case "16":
+			CropHibrido = !CropHibrido
+			if CropHibrido {
+				ui.OKLn("Crop HÍBRIDO ON: cara → 9:16, sin cara → 4:5 + blur")
+			} else {
+				fmt.Println(ui.Col(ui.Gray, "  ⏹️  Crop 9:16 puro (siempre siguiendo caras)"))
+			}
+		case "17":
+			configurarSubtitulos()
+		case "18":
+			configurarCropHorizontal()
+		case "19":
 			fmt.Println()
 			fmt.Println(ui.Col(ui.Cyan, "  👋  Adiós"))
 			fmt.Println()
 			return
+
 		default:
 			ui.ErrLn("Opción inválida: " + opt)
 		}
