@@ -34,6 +34,10 @@ func showStatus(outDir string) {
 	fmt.Printf("  %s %s\n",
 		ui.Col(ui.Cyan, "📹"),
 		ui.Col(ui.White, fmt.Sprintf("%d clips generados", len(clips))))
+	fmt.Printf("  %s %s %s\n",
+		ui.Col(ui.Cyan, "📱"),
+		ui.Col(ui.White, "Plataforma: "),
+		ui.Col(ui.White, plataformaActual.Nombre()))
 	fmt.Printf("  %s %s\n",
 		ui.Col(ui.Cyan, "🔧"),
 		ui.Col(ui.White, "Seguir texto en crop: ")+ui.Estado(SeguirTexto))

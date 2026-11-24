@@ -172,21 +172,21 @@ func ObtenerFPSVideo(path string) float64 {
 }
 
 // tieneAudio devuelve true si el archivo tiene al menos un stream de audio.
-func tieneAudio(path string) bool {
-	cmd := exec.Command("ffprobe",
-		"-v", "error",
-		"-select_streams", "a:0",
-		"-show_entries", "stream=codec_type",
-		"-of", "csv=p=0",
-		path,
-	)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	if err := cmd.Run(); err != nil {
-		return false
-	}
-	return strings.TrimSpace(out.String()) == "audio"
-}
+// func tieneAudio(path string) bool {
+// 	cmd := exec.Command("ffprobe",
+// 		"-v", "error",
+// 		"-select_streams", "a:0",
+// 		"-show_entries", "stream=codec_type",
+// 		"-of", "csv=p=0",
+// 		path,
+// 	)
+// 	var out bytes.Buffer
+// 	cmd.Stdout = &out
+// 	if err := cmd.Run(); err != nil {
+// 		return false
+// 	}
+// 	return strings.TrimSpace(out.String()) == "audio"
+// }
 
 // isAlreadyEndCapped detecta si el archivo ya tiene el sufijo _end
 // para no re-procesar en bucle al apuntar a una carpeta.

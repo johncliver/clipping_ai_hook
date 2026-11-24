@@ -3,13 +3,12 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
-
-// Tope duro de duración por clip (2:50).
-const maxClipSegundos = 170.0
 
 // Lead-in antes del hook (para no cortar el primer sonido).
 const hookLeadIn = 0.10
@@ -19,19 +18,66 @@ const hookTolerancia = 0.30
 
 // --- Paneo de lectura ---
 
-// Velocidad del paneo cuando la cámara "lee" texto (px de video fuente / s).
 const paneoLecturaPxPerSec = 520.0
-
-// Ancho mínimo (relativo) de un bloque de texto para que active paneo de lectura.
 const textoMinAnchoRel = 0.15
-
-// Si el texto ocupa más que esto del frame, prioridad sobre las caras.
 const textoDominaAnchoRel = 0.35
 
-// SeguirTexto controla si el crop persigue texto en pantalla.
-// Desactivado por defecto: el crop solo sigue caras.
-// Se puede alternar desde el menú (opción 10).
 var SeguirTexto = false
+
+// ══════════════════════════════════════════════════════════════
+// Plataforma de destino (afecta al tope de duración por clip)
+// ══════════════════════════════════════════════════════════════
+
+type Plataforma int
+
+const (
+	PlataformaYouTube Plataforma = iota // Shorts: máx 120s
+	PlataformaReels                     // TikTok/Reels/Shorts general: máx 170s
+	PlataformaLarga                     // Plataformas que aceptan clips largos: máx 300s
+)
+
+var plataformaActual = PlataformaYouTube
+
+func (p Plataforma) Nombre() string {
+	switch p {
+	case PlataformaYouTube:
+		return "YouTube Shorts (≤2:00)"
+	case PlataformaReels:
+		return "TikTok/Reels (≤2:50)"
+	case PlataformaLarga:
+		return "Larga (≤5:00)"
+	}
+	return "?"
+}
+
+func (p Plataforma) MaxSeg() float64 {
+	switch p {
+	case PlataformaYouTube:
+		return 120.0
+	case PlataformaReels:
+		return 170.0
+	case PlataformaLarga:
+		return 300.0
+	}
+	return 170.0
+}
+
+// IdealSeg: extremo superior del rango "ideal" sugerido al modelo.
+func (p Plataforma) IdealSeg() float64 {
+	switch p {
+	case PlataformaYouTube:
+		return 90.0
+	case PlataformaReels:
+		return 120.0
+	case PlataformaLarga:
+		return 180.0
+	}
+	return 90.0
+}
+
+func maxClipActual() float64 { return plataformaActual.MaxSeg() }
+
+// ══════════════════════════════════════════════════════════════
 
 type ClipSpec struct {
 	InicioSeg   float64  `json:"inicio_seg"`
@@ -200,7 +246,7 @@ func mejorFinDeFraseAntes(t *Transcripcion, maxFin, inicio float64) float64 {
 	return mejor
 }
 
-// ---- Validación completa ----
+// ---- Validación completa (usa maxClipActual()) ----
 
 func validarClip(clip *ClipSpec, t *Transcripcion) {
 	if t == nil || len(t.Segmentos) == 0 {
@@ -223,7 +269,8 @@ func validarClip(clip *ClipSpec, t *Transcripcion) {
 	if clip.FinSeg <= clip.InicioSeg {
 		clip.FinSeg = clip.InicioSeg + 1
 	}
-	maxFin := clip.InicioSeg + maxClipSegundos
+	maxSeg := maxClipActual()
+	maxFin := clip.InicioSeg + maxSeg
 	if maxFin > durTotal {
 		maxFin = durTotal
 	}
@@ -246,15 +293,12 @@ func validarClip(clip *ClipSpec, t *Transcripcion) {
 	}
 }
 
-// ---- Crop track unificado (caras + texto opcional) ----
+// ---- Crop track unificado (sin cambios de fondo, solo imports) ----
 
-// regionProminente devuelve la región de texto más ancha en un instante dado,
-// o nil si ninguna supera textoMinAnchoRel.
 func regionProminente(td *TextData, tAbs float64) *TextRegion {
 	if td == nil {
 		return nil
 	}
-	// Ventana de ±0.4s para tolerar variaciones de muestreo
 	const win = 0.4
 	var best *TextRegion
 	for i := range td.Samples {
@@ -275,8 +319,6 @@ func regionProminente(td *TextData, tAbs float64) *TextRegion {
 	return best
 }
 
-// facePosicionEn devuelve la x objetivo (px) de la cara relevante en un instante,
-// o -1 si no hay cara.
 func facePosicionEn(fd *FaceData, tAbs float64, cropW, srcW int) float64 {
 	if fd == nil {
 		return -1
@@ -308,10 +350,6 @@ func facePosicionEn(fd *FaceData, tAbs float64, cropW, srcW int) float64 {
 	return x
 }
 
-// ---- Habla + anticipación (look-ahead) ----
-
-// hayHablaEnVentana devuelve true si hay algún segmento activo en [t0, t1].
-// Se usa para anticipar el foco al hablante antes de que hable.
 func hayHablaEnVentana(t *Transcripcion, t0, t1 float64) bool {
 	if t == nil {
 		return false
@@ -328,9 +366,6 @@ func hayHablaEnVentana(t *Transcripcion, t0, t1 float64) bool {
 	return false
 }
 
-// buscarCaraHablante busca en las muestras de caras dentro de [t0, t1]
-// la cara con más mouth_motion (o speaking_id) y devuelve su detección.
-// Fallback: la cara más grande de la ventana.
 func buscarCaraHablante(fd *FaceData, t0, t1 float64) *FaceDetect {
 	if fd == nil {
 		return nil
@@ -356,7 +391,6 @@ func buscarCaraHablante(fd *FaceData, t0, t1 float64) *FaceDetect {
 	if best != nil {
 		return best
 	}
-	// Fallback: la cara más grande de la ventana
 	for i := range fd.Samples {
 		s := &fd.Samples[i]
 		if s.T < t0 || s.T > t1 {
@@ -371,13 +405,6 @@ func buscarCaraHablante(fd *FaceData, t0, t1 float64) *FaceDetect {
 	return best
 }
 
-// facePosicionConHabla: como facePosicionEn pero usa la transcripción para
-// ANTICIPAR el foco hacia el hablante antes de que empiece a hablar.
-//
-// Orden de prioridad:
-//  1. Si en [t, t+1.2] habrá habla → mover al hablante futuro (look-ahead)
-//  2. Si en [t-0.7, t+0.7] hay habla activa → priorizar al hablante actual
-//  3. Fallback → cara más grande (comportamiento anterior)
 func facePosicionConHabla(fd *FaceData, t *Transcripcion, tAbs float64,
 	cropW, srcW int) float64 {
 	if fd == nil {
@@ -396,36 +423,19 @@ func facePosicionConHabla(fd *FaceData, t *Transcripcion, tAbs float64,
 		}
 		return x
 	}
-
-	// 1) Anticipación: si habrá habla, ir al hablante futuro
 	if hayHablaEnVentana(t, tAbs, tAbs+1.2) {
 		if face := buscarCaraHablante(fd, tAbs, tAbs+1.2); face != nil {
 			return clampX(face.CX*float64(srcW) - float64(cropW)/2)
 		}
 	}
-
-	// 2) Habla actual: si está hablando ahora, priorizar al hablante actual
 	if hayHablaEnVentana(t, tAbs-0.7, tAbs+0.7) {
 		if face := buscarCaraHablante(fd, tAbs-0.7, tAbs+0.7); face != nil {
 			return clampX(face.CX*float64(srcW) - float64(cropW)/2)
 		}
 	}
-
-	// 3) Fallback: cara más grande
 	return facePosicionEn(fd, tAbs, cropW, srcW)
 }
 
-// construirCropTrackUnificado mezcla caras y (opcionalmente) texto en una serie
-// temporal y devuelve keyframes comprimidos para FFmpeg.
-//
-// Reglas:
-//   - Si SeguirTexto está OFF (por defecto): el crop solo sigue caras.
-//   - Si SeguirTexto está ON y hay texto dominante (>textoDominaAnchoRel):
-//     gana el texto. Si el bloque es más ancho que el crop, se panea a
-//     velocidad de lectura.
-//   - Si no hay ninguno, mantiene la última posición.
-//   - Si hay habla en la transcripción, se anticipa el foco al hablante
-//     (look-ahead) antes de que empiece a hablar.
 func construirCropTrackUnificado(fd *FaceData, td *TextData, t *Transcripcion,
 	inicio, fin float64, cropW, srcW int) []CropKey {
 
@@ -434,13 +444,12 @@ func construirCropTrackUnificado(fd *FaceData, td *TextData, t *Transcripcion,
 		maxX = 0
 	}
 
-	const dt = 0.4 // paso de muestreo interno
+	const dt = 0.4
 	n := int((fin-inicio)/dt) + 1
 	if n < 1 {
 		n = 1
 	}
 
-	// Posición inicial
 	x := maxX / 2.0
 	if fd != nil {
 		if fx := facePosicionConHabla(fd, t, inicio, cropW, srcW); fx >= 0 {
@@ -451,8 +460,7 @@ func construirCropTrackUnificado(fd *FaceData, td *TextData, t *Transcripcion,
 	type sample struct{ t, x float64 }
 	var series []sample
 
-	// Para paneo de lectura dentro de un bloque:
-	lectT0 := -1.0 // inicio del bloque actual de texto dominante
+	lectT0 := -1.0
 	var lectX0, lectX1 float64
 	var lectDur float64
 
@@ -460,7 +468,6 @@ func construirCropTrackUnificado(fd *FaceData, td *TextData, t *Transcripcion,
 		tAbs := inicio + float64(i)*dt
 		var target float64 = -1
 
-		// El texto SOLO influye en el crop si el usuario lo activa.
 		var r *TextRegion
 		if SeguirTexto {
 			r = regionProminente(td, tAbs)
@@ -468,15 +475,12 @@ func construirCropTrackUnificado(fd *FaceData, td *TextData, t *Transcripcion,
 
 		if r != nil {
 			if r.W >= textoDominaAnchoRel {
-				// Texto manda. Calcular rango de paneo dentro del bloque.
 				textoXPx := r.X * float64(srcW)
 				textoWPx := r.W * float64(srcW)
 				if textoWPx <= float64(cropW) {
-					// Cabe: centrar sobre el texto
 					target = textoXPx + textoWPx/2 - float64(cropW)/2
 					lectT0 = -1
 				} else {
-					// No cabe: panear a velocidad de lectura
 					lectX0 = textoXPx - 20
 					lectX1 = textoXPx + textoWPx - float64(cropW) + 20
 					lectDur = (lectX1 - lectX0) / paneoLecturaPxPerSec
@@ -493,7 +497,6 @@ func construirCropTrackUnificado(fd *FaceData, td *TextData, t *Transcripcion,
 					target = lectX0 + (lectX1-lectX0)*frac
 				}
 			} else {
-				// Texto presente pero no dominante: se ignora para el crop
 				lectT0 = -1
 			}
 		} else {
@@ -501,7 +504,6 @@ func construirCropTrackUnificado(fd *FaceData, td *TextData, t *Transcripcion,
 		}
 
 		if target < 0 {
-			// Sin texto dominante (o SeguirTexto=false): cara con anticipación
 			if fx := facePosicionConHabla(fd, t, tAbs, cropW, srcW); fx >= 0 {
 				target = fx
 			} else {
@@ -519,7 +521,6 @@ func construirCropTrackUnificado(fd *FaceData, td *TextData, t *Transcripcion,
 		series = append(series, sample{t: tAbs - inicio, x: x})
 	}
 
-	// Comprimir a keyframes significativos
 	const umbralPx = 55.0
 	const minInterval = 1.1
 	keys := []CropKey{{T: series[0].t, XPx: int(series[0].x)}}
@@ -561,6 +562,101 @@ func extraerJSON(s string) string {
 	}
 	return s[start : end+1]
 }
+
+// ══════════════════════════════════════════════════════════════
+// Fusión de planes (multi-chunk)
+// ══════════════════════════════════════════════════════════════
+
+// FusionarPlanes combina los planes parciales de todos los chunks en uno,
+// elimina duplicados (clips que se solapan mucho y empiezan cerca) y
+// revalida cada clip con validarClip para que respete el tope actual.
+func FusionarPlanes(planes []*Plan, t *Transcripcion) *Plan {
+	if len(planes) == 0 {
+		return &Plan{}
+	}
+
+	var todos []ClipSpec
+	var warns []string
+	seenWarn := map[string]bool{}
+
+	for _, p := range planes {
+		if p == nil {
+			continue
+		}
+		todos = append(todos, p.Clips...)
+		for _, w := range p.Advertencias {
+			w = strings.TrimSpace(w)
+			if w != "" && !seenWarn[w] {
+				seenWarn[w] = true
+				warns = append(warns, w)
+			}
+		}
+	}
+
+	sort.Slice(todos, func(i, j int) bool {
+		return todos[i].InicioSeg < todos[j].InicioSeg
+	})
+
+	var final []ClipSpec
+	for _, c := range todos {
+		cc := c
+		validarClip(&cc, t)
+
+		merged := false
+		for i := range final {
+			if clipsSonElMismo(final[i], cc) {
+				merged = true
+				if cc.FinSeg-cc.InicioSeg > final[i].FinSeg-final[i].InicioSeg {
+					razonVieja := final[i].Razon
+					hashViejos := final[i].Hashtags
+					final[i] = cc
+					if final[i].Razon == "" && razonVieja != "" {
+						final[i].Razon = razonVieja
+					}
+					if len(final[i].Hashtags) == 0 && len(hashViejos) > 0 {
+						final[i].Hashtags = hashViejos
+					}
+				} else {
+					if final[i].Razon == "" && cc.Razon != "" {
+						final[i].Razon = cc.Razon
+					}
+					if len(final[i].Hashtags) == 0 && len(cc.Hashtags) > 0 {
+						final[i].Hashtags = cc.Hashtags
+					}
+				}
+				break
+			}
+		}
+		if !merged {
+			final = append(final, cc)
+		}
+	}
+
+	sort.Slice(final, func(i, j int) bool {
+		return final[i].InicioSeg < final[j].InicioSeg
+	})
+
+	return &Plan{Clips: final, Advertencias: warns}
+}
+
+// clipsSonElMismo: dos clips se consideran el mismo si empiezan a menos de
+// 15s el uno del otro Y su solape temporal supera el 50% del más corto.
+func clipsSonElMismo(a, b ClipSpec) bool {
+	if math.Abs(a.InicioSeg-b.InicioSeg) > 15 {
+		return false
+	}
+	overlap := math.Min(a.FinSeg, b.FinSeg) - math.Max(a.InicioSeg, b.InicioSeg)
+	if overlap <= 0 {
+		return false
+	}
+	durMin := math.Min(a.FinSeg-a.InicioSeg, b.FinSeg-b.InicioSeg)
+	if durMin <= 0 {
+		return false
+	}
+	return overlap/durMin > 0.5
+}
+
+// ══════════════════════════════════════════════════════════════
 
 func GenerarClip(videoPath string, t *Transcripcion,
 	faceData *FaceData, textData *TextData,
@@ -611,7 +707,6 @@ func GenerarClip(videoPath string, t *Transcripcion,
 	}
 	fmt.Printf("   ✅ clip %d: %s\n", idx+1, output)
 
-	// ── End card automático (si está configurado) ──
 	if EndCardImagen != "" {
 		tmpOut := strings.TrimSuffix(output, ".mp4") + "_endtmp.mp4"
 		if err := AplicarEndCardEnClip(output, tmpOut); err != nil {
@@ -620,7 +715,6 @@ func GenerarClip(videoPath string, t *Transcripcion,
 		} else {
 			_ = os.Remove(output)
 			if err := os.Rename(tmpOut, output); err != nil {
-				// Fallback: dejar el archivo con sufijo _end
 				finalName := strings.TrimSuffix(output, ".mp4") + "_end.mp4"
 				_ = os.Rename(tmpOut, finalName)
 				fmt.Printf("   🖼️  clip %d con end card → %s\n", idx+1, filepath.Base(finalName))

@@ -43,7 +43,8 @@ type Transcripcion struct {
 func (t *Transcripcion) TextoTemporal() string {
 	var b strings.Builder
 	for _, s := range t.Segmentos {
-		fmt.Fprintf(&b, "[%s - %s] %s\n", fmtTS(s.Inicio), fmtTS(s.Fin), strings.TrimSpace(s.Texto))
+		fmt.Fprintf(&b, "[%s - %s] %s\n",
+			fmtTS(s.Inicio), fmtTS(s.Fin), s.Texto)
 	}
 	return b.String()
 }

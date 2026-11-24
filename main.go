@@ -92,7 +92,7 @@ func main() {
 		case "14":
 			configurarEndCard()
 		case "15":
-			doEndCard(outDir) // ← utilidad suelta para clips ya existentes
+			doEndCard(outDir)
 		case "16":
 			CropHibrido = !CropHibrido
 			if CropHibrido {
@@ -105,11 +105,20 @@ func main() {
 		case "18":
 			configurarCropHorizontal()
 		case "19":
+			configurarTamanoVertical()
+		case "20":
+			doSubtitulosSolo(outDir)
+		case "21":
+			configurarPlataforma()
+		case "22":
+			configurarEndVideo(outDir)
+		case "23":
+			doEndVideo(outDir)
+		case "24":
 			fmt.Println()
 			fmt.Println(ui.Col(ui.Cyan, "  👋  Adiós"))
 			fmt.Println()
 			return
-
 		default:
 			ui.ErrLn("Opción inválida: " + opt)
 		}

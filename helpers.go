@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -74,4 +76,15 @@ func ColapsarAUnaLinea(s string) string {
 		s = strings.ReplaceAll(s, "  ", " ")
 	}
 	return strings.TrimSpace(s)
+}
+
+func listarChunks(outDir string) []string {
+	files, _ := filepath.Glob(
+		filepath.Join(outDir, "respuesta_deepseek_chunk_*.json"))
+	sort.Strings(files)
+	return files
+}
+
+func readFile(p string) ([]byte, error) {
+	return os.ReadFile(p)
 }

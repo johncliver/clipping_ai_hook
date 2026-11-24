@@ -14,10 +14,11 @@ func imprimirCabecera(source, outDir string) {
 	fmt.Println()
 	fmt.Println("  " + ui.D("📂 Origen:  ") + ui.Col(ui.White, source))
 	fmt.Println("  " + ui.D("📁 Salida:  ") + ui.Col(ui.White, outDir+"/"))
-	fmt.Println("  " + ui.D("🔧 Texto:   ") + ui.Estado(SeguirTexto))
-	fmt.Println("  " + ui.D("🔧 Texto:   ") + ui.Estado(SeguirTexto))
+	fmt.Println("  " + ui.D("📱 Plataforma: ") + ui.Col(ui.White, plataformaActual.Nombre()))
+	fmt.Println("  " + ui.D("🔧 Seguir texto: ") + ui.Estado(SeguirTexto))
+	fmt.Println("  " + ui.D("🎬 Crop híbrido: ") + ui.Estado(CropHibrido))
 	fmt.Println("  " + ui.D("🖼️  End card:") + " " + estadoEndCard())
-	fmt.Println("  " + ui.D("🖼️  End card:") + " " + estadoEndCard())
+	fmt.Println("  " + ui.D("🎞️  End video:") + " " + estadoEndVideo())
 	fmt.Println("  " + ui.D("📝 Subtítulos:") + " " + estadoSubtitulos())
 	fmt.Println(ui.Col(ui.Cyan, "════════════════════════════════════════════════════════"))
 }
@@ -84,7 +85,7 @@ func imprimirMenu() {
 		ui.Estado(EndCardImagen != ""))
 	fmt.Printf("  %s)  %s\n",
 		ui.Col(ui.Yellow+ui.Bold, "15"),
-		ui.Col(ui.Green, "Añadir end card a clips existentes (post-proceso)"))
+		ui.Col(ui.Green, "Añadir end card a clips existentes"))
 	fmt.Printf("  %s)  %s  %s\n",
 		ui.Col(ui.Yellow+ui.Bold, "16"),
 		ui.Col(ui.White, "Crop híbrido (cara/blur)"),
@@ -93,12 +94,30 @@ func imprimirMenu() {
 		ui.Col(ui.Yellow+ui.Bold, "17"),
 		ui.Col(ui.White, "Posición de subtítulos"),
 		ui.Estado(SubsPosicion != "bottom"))
-	fmt.Printf("  %s)  %s  %s\n",
+	fmt.Printf("  %s)  %s %s\n",
 		ui.Col(ui.Yellow+ui.Bold, "18"),
 		ui.Col(ui.White, "Tamaño crop horizontal (blur)"),
 		ui.Col(ui.Gray, CropHorizontalPreset))
-	fmt.Printf("  %s)  %s\n",
+	fmt.Printf("  %s)  %s %s\n",
 		ui.Col(ui.Yellow+ui.Bold, "19"),
+		ui.Col(ui.White, "Tamaño de salida (vertical)"),
+		ui.Col(ui.Gray, TamanoVerticalPreset))
+	fmt.Printf("  %s)  %s\n",
+		ui.Col(ui.Yellow+ui.Bold, "20"),
+		ui.Col(ui.Green, "Subtítulos .ass desde transcripción (color karaoke configurable)"))
+	fmt.Printf("  %s)  %s  %s\n",
+		ui.Col(ui.Yellow+ui.Bold, "21"),
+		ui.Col(ui.White, "Plataforma de destino"),
+		ui.Col(ui.Gray, plataformaActual.Nombre()))
+	fmt.Printf("  %s)  %s  %s\n",
+		ui.Col(ui.Yellow+ui.Bold, "22"),
+		ui.Col(ui.White, "End video en clips"),
+		ui.Estado(EndVideoPath != ""))
+	fmt.Printf("  %s)  %s\n",
+		ui.Col(ui.Yellow+ui.Bold, "23"),
+		ui.Col(ui.Green, "Añadir end video a clips existentes"))
+	fmt.Printf("  %s)  %s\n",
+		ui.Col(ui.Yellow+ui.Bold, "24"),
 		ui.Col(ui.Red, "Salir"))
 	fmt.Println(ui.Col(ui.Cyan, ui.Rule))
 }
@@ -109,4 +128,38 @@ func filaAccion(num, accion, archivo string) {
 		ui.Col(ui.White, fmt.Sprintf("%-22s", accion)),
 		ui.Col(ui.Dim, "→"),
 		ui.Col(ui.Gray, archivo))
+}
+
+// configurarPlataforma cambia el tope duro de duración por clip.
+func configurarPlataforma() {
+	fmt.Println()
+	fmt.Println(ui.Col(ui.Cyan, "📱 Plataforma de destino"))
+	fmt.Println(ui.Col(ui.Gray, "  Afecta al tope duro de duración por clip y al rango ideal."))
+	fmt.Println()
+	for i, p := range []Plataforma{PlataformaYouTube, PlataformaReels, PlataformaLarga} {
+		marca := " "
+		if p == plataformaActual {
+			marca = "●"
+		}
+		fmt.Printf("  %s %d) %-24s  (máx %.0fs, ideal 30-%.0fs)\n",
+			marca, i+1, p.Nombre(), p.MaxSeg(), p.IdealSeg())
+	}
+	fmt.Println()
+	op := ui.Ask("Elige 1-3 (vacío = mantener)")
+	if op == "" {
+		return
+	}
+	switch op {
+	case "1":
+		plataformaActual = PlataformaYouTube
+	case "2":
+		plataformaActual = PlataformaReels
+	case "3":
+		plataformaActual = PlataformaLarga
+	default:
+		ui.ErrLn("Opción inválida")
+		return
+	}
+	ui.OKLn("Plataforma → " + plataformaActual.Nombre())
+	ui.WarnLn("Aplica a prompts/clips que se generen a partir de ahora")
 }
